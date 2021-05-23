@@ -35,8 +35,7 @@ class VHC:
         }
 
         headers = {'Authorization': self.API_KEY, 'Content-Type': 'application/json'}
-        location_post = requests.post(self.request_path('locations/expanded/'), headers=headers, json=data)
-        logging.info(location_post.text)
+        location_post = requests.post(self.request_path('locations/expanded'), headers=headers, json=data)
         location_id = location_post.text
         return location_id
     
@@ -45,13 +44,10 @@ class VHC:
             'locationID': location,
             'min_date': str(datetime.now().date())
         }
-        logging.info(params)
         url = self.request_path(f'vaccine-availability/location/')
         response = requests.get(url, params=params)
         if response.status_code != 200:
-            logging.info(response.json())
             return None
-        logging.info(response.json())
         availabilities = response.json()
         if len(availabilities) > 0:
             return availabilities[0]['id']
@@ -71,7 +67,6 @@ class VHC:
         
         vacc_avail_headers = {'accept': 'application/json', 'Authorization': self.API_KEY, 'Content-Type':'application/json'}
         response = requests.post(self.request_path('vaccine-availability'), headers=vacc_avail_headers, json=vacc_avail_body)
-        logging.info(f'create_availability: {response.status_code}')
         return response.json()['id']
 
     def update_availability(self, id, location, available):
@@ -88,22 +83,23 @@ class VHC:
         
         vacc_avail_headers = {'accept': 'application/json', 'Authorization': self.API_KEY, 'Content-Type':'application/json'}
         response = requests.put(self.request_path(f'vaccine-availability/{id}'), headers=vacc_avail_headers, json=vacc_avail_body)
-        logging.info(f'update_availability: {response.status_code}')
         return response.json()['id']
 
     def get_or_create_location(self, url, external_key, name, address, postal_code, province):
         location = self.get_location(external_key)
         if location is None:
-            logging.info('Creating Location')
+            logging.info(f'Create Location [{external_key}]: {name}')
             location = self.create_location(url, external_key, name, address, postal_code, province)
+        else:
+            logging.info(f'Found Location  [{external_key}]: {name}')
         return location
 
     def create_or_update_availability(self, location, available):
         availability = self.get_availability(location)
         if availability is None:
-            logging.info('Creating Availability')
             availability = self.create_availability(location, available)
+            logging.info(f'Created Availability: {available} [{availability}]')
         else:
-            logging.info(f'Updating Availability: {availability}')
             availability = self.update_availability(availability, location, available)
+            logging.info(f'Updated Availability: {available} [{availability}]')
         return availability
