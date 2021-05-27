@@ -1,5 +1,5 @@
 import logging
-import requests
+import aiohttp
 from datetime import datetime
 
 class VHC:
@@ -7,22 +7,27 @@ class VHC:
     API_KEY = 'Bearer'
     VHC_ORG = 0
 
-    def __init__(self, base_url, api_key, org_id):
+    def __init__(self, base_url, api_key, org_id, session):
         self.BASE_URL = base_url
         self.API_KEY = f'Bearer {api_key}'
         self.VHC_ORG = org_id
+        self.session = session
 
     def request_path(self, path):
         return f'https://{self.BASE_URL}/api/v1/{path}'
 
-    def get_location(self, uuid):
+    async def get_location(self, uuid):
         url = self.request_path(f'locations/external/{uuid}')
-        response = requests.get(url, headers={'accept': 'application/json'})
-        if response.status_code != 200:
-            return None
-        return response.json()['id']
+        response = await self.session.get(url, headers={'accept': 'application/json'})
+        data = None
+        try:
+            data = await response.json()
+        except aiohttp.client_exceptions.ContentTypeError: # if location does not exist
+            if not data:
+                return None
+        return data['id']
 
-    def create_location(self, url, external_key, name, address, postal_code, province):
+    async def create_location(self, url, external_key, name, address, postal_code, province):
         data = {
             'name': name,
             'postcode': postal_code,
@@ -35,25 +40,26 @@ class VHC:
         }
 
         headers = {'Authorization': self.API_KEY, 'Content-Type': 'application/json'}
-        location_post = requests.post(self.request_path('locations/expanded'), headers=headers, json=data)
-        location_id = location_post.text
+        location_post = await self.session.post(self.request_path('locations/expanded'), headers=headers, json=data)
+        location_id = await location_post.text()
         return location_id
     
-    def get_availability(self, location):
+    async def get_availability(self, location):
         params = {
             'locationID': location,
             'min_date': str(datetime.now().date())
         }
         url = self.request_path(f'vaccine-availability/location/')
-        response = requests.get(url, params=params)
-        if response.status_code != 200:
+        response = await self.session.get(url, params=params)
+        if response.status != 200:
+            logging.error(f'Got Response: {response.status}')
             return None
-        availabilities = response.json()
+        availabilities = await response.json()
         if len(availabilities) > 0:
             return availabilities[0]['id']
         return None
 
-    def create_availability(self, location, available):
+    async def create_availability(self, location, available):
         date = str(datetime.now().date())+'T00:00:00Z'
         vacc_avail_body = {
             "numberAvailable": available,
@@ -66,10 +72,11 @@ class VHC:
         }
         
         vacc_avail_headers = {'accept': 'application/json', 'Authorization': self.API_KEY, 'Content-Type':'application/json'}
-        response = requests.post(self.request_path('vaccine-availability'), headers=vacc_avail_headers, json=vacc_avail_body)
-        return response.json()['id']
+        response = await self.session.post(self.request_path('vaccine-availability'), headers=vacc_avail_headers, json=vacc_avail_body)
+        data = await response.json()
+        return data['id']
 
-    def update_availability(self, id, location, available):
+    async def update_availability(self, id, location, available):
         date = str(datetime.now().date())+'T00:00:00Z'
         vacc_avail_body = {
             "numberAvailable": available,
@@ -82,24 +89,25 @@ class VHC:
         }
         
         vacc_avail_headers = {'accept': 'application/json', 'Authorization': self.API_KEY, 'Content-Type':'application/json'}
-        response = requests.put(self.request_path(f'vaccine-availability/{id}'), headers=vacc_avail_headers, json=vacc_avail_body)
-        return response.json()['id']
+        response = await self.session.put(self.request_path(f'vaccine-availability/{id}'), headers=vacc_avail_headers, json=vacc_avail_body)
+        data = await response.json()
+        return data['id']
 
-    def get_or_create_location(self, url, external_key, name, address, postal_code, province):
-        location = self.get_location(external_key)
+    async def get_or_create_location(self, url, external_key, name, address, postal_code, province):
+        location = await self.get_location(external_key)
         if location is None:
             logging.info(f'Create Location [{external_key}]: {name}')
-            location = self.create_location(url, external_key, name, address, postal_code, province)
+            location = await self.create_location(url, external_key, name, address, postal_code, province)
         else:
             logging.info(f'Found Location  [{external_key}]: {name}')
         return location
 
-    def create_or_update_availability(self, location, available):
-        availability = self.get_availability(location)
+    async def create_or_update_availability(self, location, available):
+        availability = await self.get_availability(location)
         if availability is None:
-            availability = self.create_availability(location, available)
+            availability = await self.create_availability(location, available)
             logging.info(f'Created Availability: {available} [{availability}]')
         else:
-            availability = self.update_availability(availability, location, available)
+            availability = await self.update_availability(availability, location, available)
             logging.info(f'Updated Availability: {available} [{availability}]')
         return availability
